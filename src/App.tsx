@@ -110,9 +110,10 @@ export default function App() {
         )}
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-6">
+      <main className="py-6">
         {/* 大会選択 or 開始案内 */}
         {!currentTournament ? (
+          <div className="max-w-6xl mx-auto px-4">
           <div className="text-center py-20">
             <p className="text-gray-500 text-lg mb-6">大会がありません</p>
             {appState.tournaments.length > 0 && (
@@ -140,63 +141,57 @@ export default function App() {
               ＋ 新しい大会を始める
             </button>
           </div>
+          </div>
         ) : (
           <>
-            {/* ステッパー */}
-            <div className="flex items-center justify-center mb-8 print:hidden">
-              {([1, 2, 3, 4] as Step[]).map((s, i) => (
-                <div key={s} className="flex items-center">
-                  <button
-                    onClick={() => setStep(s)}
-                    className={`flex flex-col items-center group`}
-                  >
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm border-2 transition ${
-                      step === s
-                        ? 'bg-blue-600 border-blue-600 text-white'
-                        : s < step
-                        ? 'bg-green-500 border-green-500 text-white'
-                        : 'bg-white border-gray-300 text-gray-400'
-                    }`}>
-                      {s < step ? '✓' : s}
-                    </div>
-                    <span className={`text-xs mt-1 font-medium ${
-                      step === s ? 'text-blue-600' : 'text-gray-400'
-                    }`}>
-                      {STEP_LABELS[s]}
-                    </span>
-                  </button>
-                  {i < 3 && (
-                    <div className={`w-12 sm:w-20 h-0.5 mx-1 ${s < step ? 'bg-green-400' : 'bg-gray-200'}`} />
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* 大会名表示 */}
-            <div className="text-center mb-6 print:hidden">
-              <h2 className="text-2xl font-bold text-gray-800">{currentTournament.name}</h2>
-              <p className="text-gray-500 text-sm">{currentTournament.date}</p>
+            {/* ステッパー・大会名（常時 max-w-6xl） */}
+            <div className="max-w-6xl mx-auto px-4">
+              <div className="flex items-center justify-center mb-8 print:hidden">
+                {([1, 2, 3, 4] as Step[]).map((s, i) => (
+                  <div key={s} className="flex items-center">
+                    <button onClick={() => setStep(s)} className="flex flex-col items-center">
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm border-2 transition ${
+                        step === s ? 'bg-blue-600 border-blue-600 text-white'
+                          : s < step ? 'bg-green-500 border-green-500 text-white'
+                          : 'bg-white border-gray-300 text-gray-400'
+                      }`}>
+                        {s < step ? '✓' : s}
+                      </div>
+                      <span className={`text-xs mt-1 font-medium ${step === s ? 'text-blue-600' : 'text-gray-400'}`}>
+                        {STEP_LABELS[s]}
+                      </span>
+                    </button>
+                    {i < 3 && <div className={`w-12 sm:w-20 h-0.5 mx-1 ${s < step ? 'bg-green-400' : 'bg-gray-200'}`} />}
+                  </div>
+                ))}
+              </div>
+              <div className="text-center mb-6 print:hidden">
+                <h2 className="text-2xl font-bold text-gray-800">{currentTournament.name}</h2>
+                <p className="text-gray-500 text-sm">{currentTournament.date}</p>
+              </div>
             </div>
 
             {/* ステップコンテンツ */}
             {step === 1 && (
-              <ParticipantEditor
-                tournamentName={currentTournament.name}
-                tournamentDate={currentTournament.date}
-                participants={currentTournament.participants}
-                onUpdateInfo={updateTournamentInfo}
-                onAddParticipant={addParticipant}
-                onUpdateParticipant={updateParticipant}
-                onRemoveParticipant={removeParticipant}
-                onSetParticipants={setParticipants}
-                onGenerateBracket={handleGenerateBracket}
-              />
+              <div className="max-w-6xl mx-auto px-4">
+                <ParticipantEditor
+                  tournamentName={currentTournament.name}
+                  tournamentDate={currentTournament.date}
+                  participants={currentTournament.participants}
+                  onUpdateInfo={updateTournamentInfo}
+                  onAddParticipant={addParticipant}
+                  onUpdateParticipant={updateParticipant}
+                  onRemoveParticipant={removeParticipant}
+                  onSetParticipants={setParticipants}
+                  onGenerateBracket={handleGenerateBracket}
+                />
+              </div>
             )}
 
             {step === 2 && (
               <div className="space-y-4">
-                <div className="bg-white rounded-xl shadow p-5">
-                  <div className="flex items-center justify-between mb-4">
+                <div className="max-w-6xl mx-auto px-4">
+                  <div className="flex items-center justify-between mb-2">
                     <h2 className="text-lg font-bold text-gray-700">組み合わせプレビュー</h2>
                     <div className="flex gap-2">
                       <button
@@ -213,14 +208,17 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                  <p className="text-xs text-gray-400 mb-4">参加者をドラッグ&ドロップで並び替えできます</p>
+                  <p className="text-xs text-gray-400 mb-2">参加者をドラッグ&ドロップで並び替えできます</p>
+                </div>
+                <div className="bg-white shadow-sm">
                   <BracketView
                     tournament={currentTournament}
                     interactive={true}
                     onSwapParticipants={swapParticipantsInBracket}
+                    showViewToggle={true}
                   />
                 </div>
-                <div className="flex justify-end">
+                <div className="max-w-6xl mx-auto px-4 flex justify-end">
                   <button
                     onClick={handleStartTournament}
                     className="bg-green-600 hover:bg-green-700 text-white font-bold px-8 py-3 rounded-xl text-base transition shadow"
@@ -234,17 +232,19 @@ export default function App() {
             {step === 3 && (
               <div className="space-y-4">
                 {winner && (
-                  <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl p-4 flex items-center gap-4">
-                    <span className="text-4xl">🏆</span>
-                    <div>
-                      <p className="text-yellow-700 font-bold text-lg">大会終了！</p>
-                      <p className="text-gray-800 font-bold text-2xl">{winner.name} 優勝！</p>
-                      {winner.affiliation && <p className="text-gray-500 text-sm">{winner.affiliation}</p>}
+                  <div className="max-w-6xl mx-auto px-4">
+                    <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl p-4 flex items-center gap-4">
+                      <span className="text-4xl">🏆</span>
+                      <div>
+                        <p className="text-yellow-700 font-bold text-lg">大会終了！</p>
+                        <p className="text-gray-800 font-bold text-2xl">{winner.name} 優勝！</p>
+                        {winner.affiliation && <p className="text-gray-500 text-sm">{winner.affiliation}</p>}
+                      </div>
                     </div>
                   </div>
                 )}
-                <div className="bg-white rounded-xl shadow p-5">
-                  <div className="flex items-center justify-between mb-4">
+                <div className="max-w-6xl mx-auto px-4">
+                  <div className="flex items-center justify-between mb-2">
                     <h2 className="text-lg font-bold text-gray-700">トーナメント表</h2>
                     <button
                       onClick={() => { setStep(4); setTimeout(() => window.print(), 100); }}
@@ -253,11 +253,14 @@ export default function App() {
                       印刷
                     </button>
                   </div>
-                  <p className="text-xs text-gray-400 mb-4">試合枠をクリックして結果を入力してください</p>
+                  <p className="text-xs text-gray-400 mb-2">試合枠をクリックして結果を入力してください</p>
+                </div>
+                <div className="bg-white shadow-sm">
                   <BracketView
                     tournament={currentTournament}
                     interactive={true}
                     onRecordResult={recordMatchResult}
+                    showViewToggle={true}
                   />
                 </div>
               </div>
@@ -265,7 +268,7 @@ export default function App() {
 
             {step === 4 && (
               <div>
-                <div className="flex justify-between items-center mb-4 print:hidden">
+                <div className="max-w-6xl mx-auto px-4 flex justify-between items-center mb-4 print:hidden">
                   <button
                     onClick={() => setStep(3)}
                     className="border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm transition"
@@ -279,7 +282,7 @@ export default function App() {
                     印刷する
                   </button>
                 </div>
-                <div className="bg-white rounded-xl shadow">
+                <div className="bg-white shadow-sm">
                   <PrintView tournament={currentTournament} />
                 </div>
               </div>
@@ -287,7 +290,7 @@ export default function App() {
 
             {/* 別大会に切り替え */}
             {appState.tournaments.length > 1 && (
-              <div className="mt-8 pt-6 border-t border-gray-200 print:hidden">
+              <div className="max-w-6xl mx-auto px-4 mt-8 pt-6 border-t border-gray-200 print:hidden">
                 <p className="text-sm text-gray-500 mb-2">他の大会:</p>
                 <div className="flex flex-wrap gap-2">
                   {appState.tournaments.filter(t => t.id !== currentTournament.id).map(t => (
