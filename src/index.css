@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 印刷スタイル */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 15mm;
+  }
+
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* 印刷時に非表示 */
+  header,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* ブラケット全体を収める */
+  .print-area {
+    width: 100%;
+    overflow: visible;
+  }
+
+  /* ページ区切り */
+  .bracket-page-break {
+    page-break-before: always;
+  }
+
+  /* フォントサイズを少し小さく */
+  body {
+    font-size: 11px;
+  }
+}
