@@ -13,22 +13,21 @@ interface Props {
 
 interface DragTarget { matchId: string; slot: 1 | 2; }
 
-// ─── レイアウト定数 ───────────────────────────────────────
-const ROW_H      = 40;               // スロット高
-const SCORE_H    = 20;               // スコア行高
-const MATCH_H    = ROW_H * 2 + SCORE_H; // カード高 = 100
-const CELL_H     = 66;               // Y軸ピッチ（CELL_H > MATCH_H/2 でマッチ間に隙間）
-const CARD_W     = 168;
-const COL_GAP    = 36;               // ラウンド間の接続線スペース
-const COL_TOTAL  = CARD_W + COL_GAP;
-const HEADER_H   = 56;               // ラウンドヘッダー高（ブロックラベル含む）
+type ViewMode = 'standard' | 'block' | 'tree';
 
-// Y 中心・上辺
+// ─── カード表示レイアウト定数 ──────────────────────────────
+const ROW_H      = 40;
+const SCORE_H    = 20;
+const MATCH_H    = ROW_H * 2 + SCORE_H;
+const CELL_H     = 66;
+const CARD_W     = 168;
+const COL_GAP    = 36;
+const COL_TOTAL  = CARD_W + COL_GAP;
+const HEADER_H   = 56;
+
+// Y 中心（カード表示共通）
 function matchCenterY(round: number, pos: number): number {
   return CELL_H * Math.pow(2, round - 1) * (2 * pos + 1);
-}
-function matchTopY(round: number, pos: number): number {
-  return matchCenterY(round, pos) - MATCH_H / 2;
 }
 
 function roundLabel(round: number, total: number): string {
@@ -37,6 +36,15 @@ function roundLabel(round: number, total: number): string {
   if (round === total - 2) return '準々決勝';
   return `第${round}回戦`;
 }
+
+// ─── ツリー表示レイアウト定数 ──────────────────────────────
+const T_NAME_W = 152;
+const T_LINE_W = 68;
+const T_SLOT_H = 32;
+
+function tSlotY(i: number)                { return (i + 0.5) * T_SLOT_H; }
+function tMatchY(r: number, p: number)    { return T_SLOT_H * Math.pow(2, r - 1) * (2 * p + 1); }
+function tMatchX(r: number)               { return T_NAME_W + T_LINE_W * r; }
 
 // ─────────────────────────────────────────────────────────
 
@@ -50,7 +58,7 @@ export default function BracketView({
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
   const [dragSrc, setDragSrc]   = useState<DragTarget | null>(null);
   const [dragOver, setDragOver] = useState<DragTarget | null>(null);
-  const [viewMode, setViewMode] = useState<'standard' | 'block'>('standard');
+  const [viewMode, setViewMode] = useState<ViewMode>('standard');
 
   const { matches, participants } = tournament;
   if (matches.length === 0) {
@@ -61,7 +69,7 @@ export default function BracketView({
   const slotCount   = Math.pow(2, totalRounds);
   const totalHeight = slotCount * CELL_H;
 
-  // ─── ブロック表示ヘルパー ───────────────────────────────
+  const blockViewHeight = (slotCount / 2) * CELL_H;
   const blockHalf  = (totalRounds - 1) * COL_TOTAL;
   const blockTotal = 2 * blockHalf + CARD_W;
 
@@ -77,11 +85,23 @@ export default function BracketView({
     return (m.round - 1) * COL_TOTAL;
   }
 
-  const currentWidth = viewMode === 'block'
-    ? blockTotal
-    : totalRounds * COL_TOTAL + CARD_W;
+  function getMatchY(m: { round: number; position: number }): number {
+    if (viewMode !== 'block') return matchCenterY(m.round, m.position);
+    if (m.round >= totalRounds) return CELL_H * Math.pow(2, totalRounds - 2);
+    if (isBlockB(m)) {
+      const offset = Math.pow(2, totalRounds - m.round - 1);
+      return matchCenterY(m.round, m.position - offset);
+    }
+    return matchCenterY(m.round, m.position);
+  }
 
-  // ─── 参照ヘルパー ─────────────────────────────────────
+  function getMatchTopY(m: { round: number; position: number }): number {
+    return getMatchY(m) - MATCH_H / 2;
+  }
+
+  const currentWidth  = viewMode === 'block' ? blockTotal : totalRounds * COL_TOTAL + CARD_W;
+  const currentHeight = viewMode === 'block' ? blockViewHeight : totalHeight;
+
   const getParticipant = (id?: string): Participant | undefined =>
     id ? participants.find(p => p.id === id) : undefined;
 
@@ -89,7 +109,6 @@ export default function BracketView({
   const canDrag   = interactive && isDraft && !!onSwapParticipants;
   const canClick  = interactive && !isDraft && !!onRecordResult;
 
-  // ─── ドラッグ&ドロップ ────────────────────────────────
   const handleDragStart = (matchId: string, slot: 1 | 2) => {
     if (!canDrag) return;
     setDragSrc({ matchId, slot });
@@ -110,7 +129,122 @@ export default function BracketView({
     setSelectedMatch(match);
   };
 
-  // ─── SVG 接続線 ───────────────────────────────────────
+  // ─── ツリー表示 SVG ───────────────────────────────────────
+  const treeView = (() => {
+    const r1Sorted = matches
+      .filter(m => m.round === 1)
+      .sort((a, b) => a.position - b.position);
+
+    const slotParts: Array<Participant | undefined> = new Array(slotCount).fill(undefined);
+    r1Sorted.forEach(m => {
+      slotParts[m.position * 2]     = getParticipant(m.participant1Id);
+      slotParts[m.position * 2 + 1] = getParticipant(m.participant2Id);
+    });
+
+    const treeTotalH = slotCount * T_SLOT_H;
+    const treeTotalW = T_NAME_W + T_LINE_W * (totalRounds + 1) + 80;
+
+    const els: React.ReactElement[] = [];
+
+    // スロット水平線 + 名前ラベル
+    for (let i = 0; i < slotCount; i++) {
+      const y = tSlotY(i);
+      const p = slotParts[i];
+
+      els.push(
+        <line key={`sl-${i}`}
+          x1={T_NAME_W} y1={y} x2={tMatchX(1)} y2={y}
+          stroke="#94a3b8" strokeWidth={1.5} strokeLinecap="round" />
+      );
+
+      if (p) {
+        const hasAff = !!p.affiliation;
+        els.push(
+          <text key={`nt-${i}`}
+            x={T_NAME_W - 7} y={y + (hasAff ? -1 : 4)}
+            textAnchor="end" fontSize={11} fill="#111827">
+            {p.name}
+          </text>
+        );
+        if (hasAff) {
+          els.push(
+            <text key={`na-${i}`}
+              x={T_NAME_W - 7} y={y + 10}
+              textAnchor="end" fontSize={9} fill="#9ca3af">
+              {p.affiliation}
+            </text>
+          );
+        }
+      }
+    }
+
+    // ラウンドコネクター
+    for (let r = 1; r <= totalRounds; r++) {
+      const rMatches = matches
+        .filter(m => m.round === r)
+        .sort((a, b) => a.position - b.position);
+
+      for (const m of rMatches) {
+        const x    = tMatchX(r);
+        const midY = tMatchY(r, m.position);
+        const topY = r === 1 ? tSlotY(m.position * 2)     : tMatchY(r - 1, m.position * 2);
+        const botY = r === 1 ? tSlotY(m.position * 2 + 1) : tMatchY(r - 1, m.position * 2 + 1);
+
+        const won    = !!m.winnerId;
+        const stroke = won ? '#4ade80' : '#94a3b8';
+        const sw     = won ? 2 : 1.5;
+
+        // 縦線
+        els.push(
+          <line key={`v-${r}-${m.position}`}
+            x1={x} y1={topY} x2={x} y2={botY}
+            stroke={stroke} strokeWidth={sw} strokeLinecap="round" />
+        );
+
+        // 次ラウンドへの横線
+        const nextX = r < totalRounds ? tMatchX(r + 1) : x + T_LINE_W;
+        els.push(
+          <line key={`h-${r}-${m.position}`}
+            x1={x} y1={midY} x2={nextX} y2={midY}
+            stroke={stroke} strokeWidth={sw} strokeLinecap="round" />
+        );
+
+        // クリック可能エリア（試合進行中・未確定マッチ）
+        if (canClick && !m.isBye && m.participant1Id && m.participant2Id && !m.winnerId) {
+          els.push(
+            <rect key={`ca-${m.id}`}
+              x={x - 12} y={topY - 4} width={24} height={botY - topY + 8}
+              fill="rgba(59,130,246,0.06)" rx={4} style={{ cursor: 'pointer' }}
+              onClick={() => handleMatchClick(m)} />
+          );
+        }
+      }
+    }
+
+    // 優勝ラベル
+    const finalM  = matches.find(m => m.round === totalRounds);
+    const winnerP = getParticipant(finalM?.winnerId);
+    if (winnerP) {
+      const wx = tMatchX(totalRounds) + T_LINE_W + 8;
+      const wy = tMatchY(totalRounds, 0);
+      els.push(
+        <text key="winner-label" x={wx} y={wy + 4}
+          fontSize={12} fill="#16a34a" fontWeight="bold">
+          🏆 {winnerP.name}
+        </text>
+      );
+    }
+
+    return (
+      <div className="overflow-x-auto overflow-y-auto px-6 py-4">
+        <svg width={treeTotalW} height={treeTotalH} style={{ display: 'block' }}>
+          {els}
+        </svg>
+      </div>
+    );
+  })();
+
+  // ─── SVG 接続線（カード表示用） ──────────────────────────
   const connectors = matches
     .filter(m => m.round < totalRounds)
     .map(m => {
@@ -118,8 +252,8 @@ export default function BracketView({
       const parent    = { round: m.round + 1, position: parentPos };
       const mX  = getMatchX(m);
       const pX  = getMatchX(parent);
-      const srcY = matchCenterY(m.round, m.position);
-      const dstY = matchCenterY(m.round + 1, parentPos);
+      const srcY = getMatchY(m);
+      const dstY = getMatchY(parent);
       const won  = !!m.winnerId;
 
       const inBlockB = viewMode === 'block' && isBlockB(m);
@@ -142,7 +276,6 @@ export default function BracketView({
   const roundHeaders = Array.from({ length: totalRounds }, (_, i) => i + 1).flatMap(round => {
     if (viewMode === 'block') {
       if (round === totalRounds) {
-        // 決勝は中央に1つ
         return [(
           <div key={`r${round}-center`}
             style={{ position: 'absolute', top: 0, left: blockHalf, width: CARD_W, height: HEADER_H,
@@ -151,9 +284,7 @@ export default function BracketView({
           >決勝</div>
         )];
       }
-      // Block A (左側)
       const axPos = (round - 1) * COL_TOTAL;
-      // Block B (右側)
       const bxPos = blockTotal - CARD_W - (round - 1) * COL_TOTAL;
       return [
         <div key={`r${round}-A`}
@@ -174,7 +305,6 @@ export default function BracketView({
         </div>,
       ];
     }
-    // 標準表示
     return [(
       <div key={`r${round}`}
         style={{ position: 'absolute', top: 0, left: (round - 1) * COL_TOTAL, width: CARD_W, height: HEADER_H,
@@ -188,7 +318,7 @@ export default function BracketView({
 
   // ─── マッチカード ─────────────────────────────────────
   const matchCards = matches.map(match => {
-    const top  = matchTopY(match.round, match.position);
+    const top  = getMatchTopY(match);
     const left = getMatchX(match);
     const p1   = getParticipant(match.participant1Id);
     const p2   = getParticipant(match.participant2Id);
@@ -211,7 +341,6 @@ export default function BracketView({
         style={{ position: 'absolute', top, left, width: CARD_W, height: MATCH_H }}
         className={`rounded-lg border-2 overflow-hidden bg-white shadow-sm transition-all ${borderClass} ${isByeMatch ? 'opacity-50' : ''}`}
       >
-        {/* スロット1 */}
         <SlotRow
           participant={p1}
           isWinner={!!match.winnerId && match.winnerId === p1?.id}
@@ -225,11 +354,7 @@ export default function BracketView({
           onDragLeave={() => setDragOver(null)}
           onDrop={handleDrop}
         />
-
-        {/* スコア行 */}
         <ScoreRow score={match.score} hasResult={hasResult} bothReady={bothReady} isBye={isByeMatch} />
-
-        {/* スロット2 */}
         <SlotRow
           participant={p2}
           isWinner={!!match.winnerId && match.winnerId === p2?.id}
@@ -247,14 +372,14 @@ export default function BracketView({
     );
   });
 
-  // ─── 優勝バナー ───────────────────────────────────────
+  // ─── 優勝バナー（カード表示用） ──────────────────────────
   const finalMatch = matches.find(m => m.round === totalRounds);
   const winner     = getParticipant(finalMatch?.winnerId);
   const winnerBanner = winner ? (
     <div
       style={{
         position: 'absolute',
-        top: HEADER_H + matchTopY(totalRounds, 0) - 8,
+        top: HEADER_H + getMatchTopY({ round: totalRounds, position: 0 }) - 8,
         left: getMatchX({ round: totalRounds, position: 0 }) + CARD_W + 16,
       }}
       className="bg-yellow-50 border-2 border-yellow-400 rounded-xl px-4 py-3 shadow text-center"
@@ -271,46 +396,47 @@ export default function BracketView({
     <div>
       {/* ビュー切り替えボタン */}
       {showViewToggle && (
-        <div className="flex justify-end mb-3 print:hidden">
+        <div className="flex justify-end mb-3 px-6 print:hidden">
           <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
             <button
               onClick={() => setViewMode('standard')}
               className={`px-4 py-1.5 font-medium transition ${viewMode === 'standard' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
             >
-              標準表示
+              標準
             </button>
             <button
               onClick={() => setViewMode('block')}
               className={`px-4 py-1.5 font-medium transition border-l border-gray-200 ${viewMode === 'block' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
             >
-              ブロック表示
+              ブロック
+            </button>
+            <button
+              onClick={() => setViewMode('tree')}
+              className={`px-4 py-1.5 font-medium transition border-l border-gray-200 ${viewMode === 'tree' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              ライン
             </button>
           </div>
         </div>
       )}
 
       {/* ブラケット本体 */}
-      <div className="overflow-x-auto overflow-y-auto">
-        <div style={{ position: 'relative', width: currentWidth, height: totalHeight + HEADER_H, minWidth: currentWidth }}>
-          {/* ヘッダー */}
-          {roundHeaders}
-
-          {/* SVG接続線 */}
-          <svg
-            style={{ position: 'absolute', top: HEADER_H, left: 0, width: currentWidth, height: totalHeight, overflow: 'visible', pointerEvents: 'none' }}
-          >
-            {connectors}
-          </svg>
-
-          {/* マッチカード */}
-          <div style={{ position: 'absolute', top: HEADER_H, left: 0, width: currentWidth, height: totalHeight }}>
-            {matchCards}
+      {viewMode === 'tree' ? treeView : (
+        <div className="overflow-x-auto overflow-y-auto px-6 py-4">
+          <div style={{ position: 'relative', width: currentWidth, height: currentHeight + HEADER_H, minWidth: currentWidth }}>
+            {roundHeaders}
+            <svg
+              style={{ position: 'absolute', top: HEADER_H, left: 0, width: currentWidth, height: currentHeight, overflow: 'visible', pointerEvents: 'none' }}
+            >
+              {connectors}
+            </svg>
+            <div style={{ position: 'absolute', top: HEADER_H, left: 0, width: currentWidth, height: currentHeight }}>
+              {matchCards}
+            </div>
+            {tournament.status === 'completed' && winnerBanner}
           </div>
-
-          {/* 優勝バナー */}
-          {tournament.status === 'completed' && winnerBanner}
         </div>
-      </div>
+      )}
 
       {/* 試合結果入力モーダル */}
       {selectedMatch && onRecordResult && (
@@ -385,7 +511,6 @@ function ScoreRow({ score, hasResult, bothReady, isBye }: ScoreRowProps) {
           {score}
         </span>
       ) : hasResult && !score ? (
-        // 結果あり・スコアなし → 勝者マーク
         <span className="text-xs text-green-400">確定</span>
       ) : bothReady && !isBye ? (
         <span className="text-xs text-gray-300">vs</span>

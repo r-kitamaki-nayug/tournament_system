@@ -37,34 +37,50 @@ export function generateBracket(participants: Participant[]): Match[] {
   const slotCount = nextPowerOfTwo(participants.length);
   const roundCount = Math.log2(slotCount);
 
-  // シードあり → seed昇順（同値は元の配列順で先着優先）
-  // シードなし → シードありの後ろに元の配列順で配置
-  const sorted = participants
-    .map((p, i) => ({ ...p, _idx: i }))
-    .sort((a, b) => {
-      const aS = a.seed != null;
-      const bS = b.seed != null;
-      if (aS && bS) return a.seed !== b.seed ? (a.seed as number) - (b.seed as number) : a._idx - b._idx;
-      if (aS) return -1;
-      if (bS) return 1;
-      return a._idx - b._idx;
-    });
+  const indexed = participants.map((p, i) => ({ ...p, _idx: i }));
+  const seeded = indexed
+    .filter(p => p.seed != null)
+    .sort((a, b) => a.seed !== b.seed ? (a.seed as number) - (b.seed as number) : a._idx - b._idx);
+  const unseeded = indexed
+    .filter(p => p.seed == null)
+    .sort((a, b) => a._idx - b._idx);
+
+  const numByes      = slotCount - participants.length;
+  const byesForSeeds = Math.min(numByes, seeded.length);
+  const overflowByes = numByes - byesForSeeds;
 
   const slotByIdx = slotForSeedIndex(slotCount);
   const slots: (string | null)[] = new Array(slotCount).fill(null);
+  const byeSlots = new Set<number>();
 
-  sorted.forEach((p, i) => {
-    if (i < slotCount) {
-      slots[slotByIdx[i]] = p.id;
+  // 1. シード選手を各シード位置に配置し、上位 byesForSeeds 名の隣スロットをBYEに
+  seeded.forEach((p, i) => { slots[slotByIdx[i]] = p.id; });
+  for (let i = 0; i < byesForSeeds; i++) {
+    byeSlots.add(slotByIdx[i] ^ 1);
+  }
+
+  // 2. 溢れBYE: 無シード先着 overflowByes 名を仮想シード位置に置き隣をBYEに
+  const unseededQueue = [...unseeded];
+  for (let i = 0; i < overflowByes; i++) {
+    const vIdx = seeded.length + i;
+    slots[slotByIdx[vIdx]] = unseededQueue.shift()!.id;
+    byeSlots.add(slotByIdx[vIdx] ^ 1);
+  }
+
+  // 3. 残りの無シード選手を空き（非BYE）スロットに順番に詰める
+  for (let slot = 0; slot < slotCount; slot++) {
+    if (slots[slot] === null && !byeSlots.has(slot)) {
+      const p = unseededQueue.shift();
+      if (p) slots[slot] = p.id;
     }
-  });
+  }
 
   const matches: Match[] = [];
 
   for (let pos = 0; pos < slotCount / 2; pos++) {
     const p1Id = slots[pos * 2];
     const p2Id = slots[pos * 2 + 1];
-    const isBye = (p1Id !== null && p2Id === null) || (p1Id === null && p2Id !== null);
+    const isBye = (!!p1Id && !p2Id) || (!p1Id && !!p2Id);
     const match: Match = {
       id: `r1-${pos}`,
       round: 1,
