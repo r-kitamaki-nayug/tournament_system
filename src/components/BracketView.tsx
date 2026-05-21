@@ -190,7 +190,7 @@ export default function BracketView({
         const topY = r === 1 ? tSlotY(m.position * 2)     : tMatchY(r - 1, m.position * 2);
         const botY = r === 1 ? tSlotY(m.position * 2 + 1) : tMatchY(r - 1, m.position * 2 + 1);
 
-        const won    = !!m.winnerId;
+        const won    = !isDraft && !!m.winnerId;
         const stroke = won ? '#4ade80' : '#94a3b8';
         const sw     = won ? 2 : 1.5;
 
@@ -254,7 +254,7 @@ export default function BracketView({
       const pX  = getMatchX(parent);
       const srcY = getMatchY(m);
       const dstY = getMatchY(parent);
-      const won  = !!m.winnerId;
+      const won  = !isDraft && !!m.winnerId;
 
       const inBlockB = viewMode === 'block' && isBlockB(m);
       const srcX = inBlockB ? mX          : mX + CARD_W;
@@ -323,30 +323,32 @@ export default function BracketView({
     const p1   = getParticipant(match.participant1Id);
     const p2   = getParticipant(match.participant2Id);
 
-    const hasResult  = !!match.winnerId;
-    const bothReady  = !!match.participant1Id && !!match.participant2Id;
-    const isByeMatch = !!match.isBye;
+    const hasResult   = !isDraft && !!match.winnerId;
+    const bothReady   = !!match.participant1Id && !!match.participant2Id;
+    const isByeMatch  = !!match.isBye;
+    // ドラフト中はBYEを通常枠として扱う（入れ替え可能にする）
+    const showAsBye   = isByeMatch && !isDraft;
     const isClickable = canClick && bothReady && !isByeMatch;
 
     let borderClass = 'border-gray-200';
-    if (isByeMatch)        borderClass = 'border-gray-100';
+    if (showAsBye)         borderClass = 'border-gray-100';
     else if (hasResult)    borderClass = 'border-green-300';
     else if (isClickable)  borderClass = 'border-blue-300 cursor-pointer hover:border-blue-500 hover:shadow-md';
-    else if (!bothReady)   borderClass = 'border-dashed border-gray-200';
+    else if (!bothReady && !isDraft) borderClass = 'border-dashed border-gray-200';
 
     return (
       <div
         key={match.id}
         onClick={() => handleMatchClick(match)}
         style={{ position: 'absolute', top, left, width: CARD_W, height: MATCH_H }}
-        className={`rounded-lg border-2 overflow-hidden bg-white shadow-sm transition-all ${borderClass} ${isByeMatch ? 'opacity-50' : ''}`}
+        className={`rounded-lg border-2 overflow-hidden bg-white shadow-sm transition-all ${borderClass} ${showAsBye ? 'opacity-50' : ''}`}
       >
         <SlotRow
           participant={p1}
-          isWinner={!!match.winnerId && match.winnerId === p1?.id}
-          isLoser={!!match.winnerId && match.winnerId !== p1?.id && !!p1}
-          isBye={isByeMatch}
-          canDrag={canDrag && !isByeMatch && match.round === 1}
+          isWinner={!isDraft && !!match.winnerId && match.winnerId === p1?.id}
+          isLoser={!isDraft && !!match.winnerId && match.winnerId !== p1?.id && !!p1}
+          isBye={showAsBye}
+          canDrag={canDrag && match.round === 1}
           matchId={match.id} slot={1}
           isDragOver={dragOver?.matchId === match.id && dragOver?.slot === 1}
           onDragStart={handleDragStart}
@@ -354,13 +356,13 @@ export default function BracketView({
           onDragLeave={() => setDragOver(null)}
           onDrop={handleDrop}
         />
-        <ScoreRow score={match.score} hasResult={hasResult} bothReady={bothReady} isBye={isByeMatch} />
+        <ScoreRow score={match.score} hasResult={hasResult} bothReady={bothReady} isBye={showAsBye} />
         <SlotRow
           participant={p2}
-          isWinner={!!match.winnerId && match.winnerId === p2?.id}
-          isLoser={!!match.winnerId && match.winnerId !== p2?.id && !!p2}
-          isBye={isByeMatch}
-          canDrag={canDrag && !isByeMatch && match.round === 1}
+          isWinner={!isDraft && !!match.winnerId && match.winnerId === p2?.id}
+          isLoser={!isDraft && !!match.winnerId && match.winnerId !== p2?.id && !!p2}
+          isBye={showAsBye}
+          canDrag={canDrag && match.round === 1}
           matchId={match.id} slot={2}
           isDragOver={dragOver?.matchId === match.id && dragOver?.slot === 2}
           onDragStart={handleDragStart}

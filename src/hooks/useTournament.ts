@@ -98,10 +98,20 @@ export function useTournament() {
     updateCurrentTournament(t => ({ ...t, matches }));
   }, [currentTournament, updateCurrentTournament]);
 
-  // 試合開始（ステップ2→3）
+  // 試合開始（ステップ2→3）: ラウンド1のBYE勝者を確定してから伝播
   const startTournament = useCallback(() => {
-    updateCurrentTournament(t => ({ ...t, status: 'active' }));
-  }, [updateCurrentTournament]);
+    if (!currentTournament) return;
+    const withByes = currentTournament.matches.map(m =>
+      (m.round === 1 && m.isBye)
+        ? { ...m, winnerId: m.participant1Id ?? m.participant2Id }
+        : m
+    );
+    updateCurrentTournament(t => ({
+      ...t,
+      status: 'active',
+      matches: propagateByes(withByes),
+    }));
+  }, [currentTournament, updateCurrentTournament]);
 
   // 試合結果を記録
   const recordMatchResult = useCallback((matchId: string, winnerId: string, score?: string) => {
@@ -152,10 +162,10 @@ export function useTournament() {
     const id1 = slot1 === 1 ? m1.participant1Id : m1.participant2Id;
     const id2 = slot2 === 1 ? m2.participant1Id : m2.participant2Id;
 
-    // BYEを再計算してround1マッチを更新するヘルパー
+    // BYEを再計算してround1マッチを更新するヘルパー（winnerId はセットしない）
     const patchR1 = (m: Match, p1: string | undefined, p2: string | undefined): Match => {
       const isBye = (!!p1 && !p2) || (!p1 && !!p2);
-      return { ...m, participant1Id: p1, participant2Id: p2, isBye, winnerId: isBye ? (p1 ?? p2) : undefined };
+      return { ...m, participant1Id: p1, participant2Id: p2, isBye, winnerId: undefined };
     };
 
     const updatedMatches = currentTournament.matches.map(m => {
@@ -188,7 +198,8 @@ export function useTournament() {
       return m;
     });
 
-    updateCurrentTournament(t => ({ ...t, matches: propagateByes(updatedMatches) }));
+    // ドラフト中は上位ラウンドを空のまま保持（試合開始時にBYEを伝播）
+    updateCurrentTournament(t => ({ ...t, matches: updatedMatches }));
   }, [currentTournament, updateCurrentTournament]);
 
   // JSONインポート
