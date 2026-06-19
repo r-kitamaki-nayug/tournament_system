@@ -1,6 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Match, Participant, Tournament } from '../types';
 import { getRounds } from '../utils/bracketGenerator';
+import {
+  buildSimplifiedBracketView,
+  getByeSlotEntries,
+  slotCenterY,
+} from '../utils/bracketDisplay';
 import MatchModal from './MatchModal';
 
 interface Props {
@@ -24,6 +29,7 @@ const CARD_W     = 168;
 const COL_GAP    = 36;
 const COL_TOTAL  = CARD_W + COL_GAP;
 const HEADER_H   = 56;
+const ENTRY_W    = 120;
 
 // Y 中心（カード表示共通）
 function matchCenterY(round: number, pos: number): number {
@@ -45,6 +51,20 @@ const T_SLOT_H = 32;
 function tSlotY(i: number)                { return (i + 0.5) * T_SLOT_H; }
 function tMatchY(r: number, p: number)    { return T_SLOT_H * Math.pow(2, r - 1) * (2 * p + 1); }
 function tMatchX(r: number)               { return T_NAME_W + T_LINE_W * r; }
+
+// ─── ドラフトシート表示レイアウト定数 ────────────────────────
+const DS_HEADER_H = 36;
+const DS_SLOT_H   = 36;
+const DS_NUM_W    = 30;
+const DS_NAME_W   = 160;
+const DS_BOX_W    = 130;
+const DS_BOX_H    = 28;
+const DS_COL_GAP  = 40;
+
+function dsSlotCY(i: number)             { return DS_HEADER_H + (i + 0.5) * DS_SLOT_H; }
+function dsMatchCY(r: number, p: number) { return DS_HEADER_H + Math.pow(2, r - 1) * (2 * p + 1) * DS_SLOT_H; }
+function dsBoxLeft(r: number)            { return DS_NUM_W + DS_NAME_W + DS_COL_GAP + (r - 2) * (DS_BOX_W + DS_COL_GAP); }
+function dsBoxRight(r: number)           { return dsBoxLeft(r) + DS_BOX_W; }
 
 // ─────────────────────────────────────────────────────────
 
@@ -69,20 +89,38 @@ export default function BracketView({
   const slotCount   = Math.pow(2, totalRounds);
   const totalHeight = slotCount * CELL_H;
 
+  const getParticipant = (id?: string): Participant | undefined =>
+    id ? participants.find(p => p.id === id) : undefined;
+
+  const bracketView = useMemo(
+    () => buildSimplifiedBracketView(tournament),
+    [tournament],
+  );
+
+  const columnRounds = bracketView.totalColumns;
+
+  const byeSlots = useMemo(
+    () => getByeSlotEntries(matches, bracketView.useSimplified),
+    [matches, participants, bracketView.useSimplified],
+  );
+
+  const entryOffset = bracketView.useSimplified && byeSlots.length > 0 ? ENTRY_W : 0;
+
   const blockViewHeight = (slotCount / 2) * CELL_H;
-  const blockHalf  = (totalRounds - 1) * COL_TOTAL;
-  const blockTotal = 2 * blockHalf + CARD_W;
+  const blockHalf  = entryOffset + (columnRounds - 1) * COL_TOTAL;
+  const blockTotal = 2 * (blockHalf - entryOffset) + CARD_W + entryOffset;
 
   function isBlockB(m: { round: number; position: number }): boolean {
     if (m.round >= totalRounds) return false;
     return m.position >= Math.pow(2, totalRounds - m.round - 1);
   }
 
-  function getMatchX(m: { round: number; position: number }): number {
-    if (viewMode === 'standard') return (m.round - 1) * COL_TOTAL;
+  function getMatchX(m: Match): number {
+    const col = bracketView.columnForMatch(m) - 1;
+    if (viewMode === 'standard') return entryOffset + col * COL_TOTAL;
     if (m.round === totalRounds) return blockHalf;
-    if (isBlockB(m)) return blockTotal - CARD_W - (m.round - 1) * COL_TOTAL;
-    return (m.round - 1) * COL_TOTAL;
+    if (isBlockB(m)) return blockTotal - CARD_W - (entryOffset + col * COL_TOTAL);
+    return entryOffset + col * COL_TOTAL;
   }
 
   function getMatchY(m: { round: number; position: number }): number {
@@ -99,11 +137,10 @@ export default function BracketView({
     return getMatchY(m) - MATCH_H / 2;
   }
 
-  const currentWidth  = viewMode === 'block' ? blockTotal : totalRounds * COL_TOTAL + CARD_W;
+  const currentWidth  = viewMode === 'block'
+    ? blockTotal
+    : entryOffset + columnRounds * COL_TOTAL + CARD_W;
   const currentHeight = viewMode === 'block' ? blockViewHeight : totalHeight;
-
-  const getParticipant = (id?: string): Participant | undefined =>
-    id ? participants.find(p => p.id === id) : undefined;
 
   const isDraft   = tournament.status === 'draft';
   const canDrag   = interactive && isDraft && !!onSwapParticipants;
@@ -179,52 +216,54 @@ export default function BracketView({
     }
 
     // ラウンドコネクター
-    for (let r = 1; r <= totalRounds; r++) {
-      const rMatches = matches
-        .filter(m => m.round === r)
-        .sort((a, b) => a.position - b.position);
+    const connectorMatches = matches
+      .filter(m => m.round < totalRounds && bracketView.showMatchCard(m))
+      .sort((a, b) => a.round - b.round || a.position - b.position);
 
-      for (const m of rMatches) {
-        const x    = tMatchX(r);
-        const midY = tMatchY(r, m.position);
-        const topY = r === 1 ? tSlotY(m.position * 2)     : tMatchY(r - 1, m.position * 2);
-        const botY = r === 1 ? tSlotY(m.position * 2 + 1) : tMatchY(r - 1, m.position * 2 + 1);
+    for (const m of connectorMatches) {
+      const r = m.round;
+      const x    = tMatchX(r);
+      const midY = tMatchY(r, m.position);
+      const topY = r === 1 ? tSlotY(m.position * 2)     : tMatchY(r - 1, m.position * 2);
+      const botY = r === 1 ? tSlotY(m.position * 2 + 1) : tMatchY(r - 1, m.position * 2 + 1);
 
-        const won    = !isDraft && !!m.winnerId;
-        const stroke = won ? '#4ade80' : '#94a3b8';
-        const sw     = won ? 2 : 1.5;
+      const parentMatch = matches.find(
+        p => p.round === m.round + 1 && p.position === Math.floor(m.position / 2),
+      );
+      const nextX = parentMatch
+        ? tMatchX(parentMatch.round)
+        : x + T_LINE_W;
 
-        // 縦線
+      const won    = !isDraft && !!m.winnerId;
+      const stroke = won ? '#4ade80' : '#94a3b8';
+      const sw     = won ? 2 : 1.5;
+
+      els.push(
+        <line key={`v-${m.id}`}
+          x1={x} y1={topY} x2={x} y2={botY}
+          stroke={stroke} strokeWidth={sw} strokeLinecap="round" />
+      );
+
+      els.push(
+        <line key={`h-${m.id}`}
+          x1={x} y1={midY} x2={nextX} y2={midY}
+          stroke={stroke} strokeWidth={sw} strokeLinecap="round" />
+      );
+
+      if (canClick && !m.isBye && m.participant1Id && m.participant2Id && !m.winnerId) {
         els.push(
-          <line key={`v-${r}-${m.position}`}
-            x1={x} y1={topY} x2={x} y2={botY}
-            stroke={stroke} strokeWidth={sw} strokeLinecap="round" />
+          <rect key={`ca-${m.id}`}
+            x={x - 12} y={topY - 4} width={24} height={botY - topY + 8}
+            fill="rgba(59,130,246,0.06)" rx={4} style={{ cursor: 'pointer' }}
+            onClick={() => handleMatchClick(m)} />
         );
-
-        // 次ラウンドへの横線
-        const nextX = r < totalRounds ? tMatchX(r + 1) : x + T_LINE_W;
-        els.push(
-          <line key={`h-${r}-${m.position}`}
-            x1={x} y1={midY} x2={nextX} y2={midY}
-            stroke={stroke} strokeWidth={sw} strokeLinecap="round" />
-        );
-
-        // クリック可能エリア（試合進行中・未確定マッチ）
-        if (canClick && !m.isBye && m.participant1Id && m.participant2Id && !m.winnerId) {
-          els.push(
-            <rect key={`ca-${m.id}`}
-              x={x - 12} y={topY - 4} width={24} height={botY - topY + 8}
-              fill="rgba(59,130,246,0.06)" rx={4} style={{ cursor: 'pointer' }}
-              onClick={() => handleMatchClick(m)} />
-          );
-        }
       }
     }
 
     // 優勝ラベル
     const finalM  = matches.find(m => m.round === totalRounds);
     const winnerP = getParticipant(finalM?.winnerId);
-    if (winnerP) {
+    if (winnerP && finalM) {
       const wx = tMatchX(totalRounds) + T_LINE_W + 8;
       const wy = tMatchY(totalRounds, 0);
       els.push(
@@ -245,15 +284,18 @@ export default function BracketView({
   })();
 
   // ─── SVG 接続線（カード表示用） ──────────────────────────
-  const connectors = matches
-    .filter(m => m.round < totalRounds)
+  const matchConnectors = matches
+    .filter(m => m.round < totalRounds && bracketView.showMatchCard(m))
     .map(m => {
-      const parentPos = Math.floor(m.position / 2);
-      const parent    = { round: m.round + 1, position: parentPos };
+      const parentMatch = matches.find(
+        p => p.round === m.round + 1 && p.position === Math.floor(m.position / 2),
+      );
+      if (!parentMatch) return null;
+
       const mX  = getMatchX(m);
-      const pX  = getMatchX(parent);
+      const pX  = getMatchX(parentMatch);
       const srcY = getMatchY(m);
-      const dstY = getMatchY(parent);
+      const dstY = getMatchY(parentMatch);
       const won  = !isDraft && !!m.winnerId;
 
       const inBlockB = viewMode === 'block' && isBlockB(m);
@@ -270,12 +312,41 @@ export default function BracketView({
           strokeWidth={won ? 2.5 : 1.5}
         />
       );
-    });
+    })
+    .filter((el): el is React.ReactElement => el != null);
+
+  const byeConnectors = byeSlots.map(entry => {
+    const r1 = matches.find(m => m.id === entry.r1MatchId);
+    if (!r1) return null;
+    const parent = matches.find(
+      p => p.round === 2 && p.position === Math.floor(r1.position / 2),
+    );
+    if (!parent || !bracketView.showMatchCard(parent)) return null;
+
+    const y = slotCenterY(entry.slotIndex);
+    const srcX = entryOffset - 8;
+    const dstX = getMatchX(parent);
+    const dstY = getMatchY(parent);
+    const midX = entryOffset + COL_TOTAL * (parent.round - 1) - COL_GAP / 2;
+    const won = !isDraft && !!r1.winnerId;
+
+    return (
+      <path
+        key={`bye-${entry.r1MatchId}`}
+        d={`M ${srcX} ${y} H ${midX} V ${dstY} H ${dstX}`}
+        fill="none"
+        stroke={won ? '#86efac' : '#e2e8f0'}
+        strokeWidth={won ? 2.5 : 1.5}
+      />
+    );
+  }).filter((el): el is React.ReactElement => el != null);
+
+  const connectors = [...matchConnectors, ...byeConnectors];
 
   // ─── ラウンドヘッダー ─────────────────────────────────
-  const roundHeaders = Array.from({ length: totalRounds }, (_, i) => i + 1).flatMap(round => {
+  const roundHeaders = Array.from({ length: columnRounds }, (_, i) => i + 1).flatMap(round => {
     if (viewMode === 'block') {
-      if (round === totalRounds) {
+      if (round === columnRounds) {
         return [(
           <div key={`r${round}-center`}
             style={{ position: 'absolute', top: 0, left: blockHalf, width: CARD_W, height: HEADER_H,
@@ -284,8 +355,8 @@ export default function BracketView({
           >決勝</div>
         )];
       }
-      const axPos = (round - 1) * COL_TOTAL;
-      const bxPos = blockTotal - CARD_W - (round - 1) * COL_TOTAL;
+      const axPos = entryOffset + (round - 1) * COL_TOTAL;
+      const bxPos = blockTotal - CARD_W - (entryOffset + (round - 1) * COL_TOTAL);
       return [
         <div key={`r${round}-A`}
           style={{ position: 'absolute', top: 0, left: axPos, width: CARD_W, height: HEADER_H,
@@ -293,7 +364,7 @@ export default function BracketView({
           className="text-xs font-bold text-gray-500"
         >
           {round === 1 && <span className="text-blue-600 text-sm mb-0.5">Aブロック</span>}
-          {roundLabel(round, totalRounds)}
+          {roundLabel(round, columnRounds)}
         </div>,
         <div key={`r${round}-B`}
           style={{ position: 'absolute', top: 0, left: bxPos, width: CARD_W, height: HEADER_H,
@@ -301,23 +372,45 @@ export default function BracketView({
           className="text-xs font-bold text-gray-500"
         >
           {round === 1 && <span className="text-orange-500 text-sm mb-0.5">Bブロック</span>}
-          {roundLabel(round, totalRounds)}
+          {roundLabel(round, columnRounds)}
         </div>,
       ];
     }
     return [(
       <div key={`r${round}`}
-        style={{ position: 'absolute', top: 0, left: (round - 1) * COL_TOTAL, width: CARD_W, height: HEADER_H,
+        style={{ position: 'absolute', top: 0, left: entryOffset + (round - 1) * COL_TOTAL, width: CARD_W, height: HEADER_H,
                  display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 6 }}
         className="text-xs font-bold text-gray-500 uppercase tracking-wide"
       >
-        {roundLabel(round, totalRounds)}
+        {roundLabel(round, columnRounds)}
       </div>
     )];
   });
 
   // ─── マッチカード ─────────────────────────────────────
-  const matchCards = matches.map(match => {
+  const byeNameLabels = byeSlots.map(entry => {
+    const p = getParticipant(entry.participantId);
+    if (!p) return null;
+    const y = slotCenterY(entry.slotIndex);
+    const won = !isDraft && matches.find(m => m.id === entry.r1MatchId)?.winnerId === p.id;
+    return (
+      <div
+        key={`bye-name-${entry.r1MatchId}`}
+        style={{
+          position: 'absolute',
+          top: HEADER_H + y - ROW_H / 2,
+          left: 0,
+          width: entryOffset - 8,
+          height: ROW_H,
+        }}
+        className={`flex items-center justify-end pr-2 text-sm truncate ${won ? 'font-bold text-green-800' : 'text-gray-800'}`}
+      >
+        {p.name}
+      </div>
+    );
+  });
+
+  const matchCards = matches.filter(bracketView.showMatchCard).map(match => {
     const top  = getMatchTopY(match);
     const left = getMatchX(match);
     const p1   = getParticipant(match.participant1Id);
@@ -326,13 +419,10 @@ export default function BracketView({
     const hasResult   = !isDraft && !!match.winnerId;
     const bothReady   = !!match.participant1Id && !!match.participant2Id;
     const isByeMatch  = !!match.isBye;
-    // ドラフト中はBYEを通常枠として扱う（入れ替え可能にする）
-    const showAsBye   = isByeMatch && !isDraft;
     const isClickable = canClick && bothReady && !isByeMatch;
 
     let borderClass = 'border-gray-200';
-    if (showAsBye)         borderClass = 'border-gray-100';
-    else if (hasResult)    borderClass = 'border-green-300';
+    if (hasResult)    borderClass = 'border-green-300';
     else if (isClickable)  borderClass = 'border-blue-300 cursor-pointer hover:border-blue-500 hover:shadow-md';
     else if (!bothReady && !isDraft) borderClass = 'border-dashed border-gray-200';
 
@@ -341,13 +431,14 @@ export default function BracketView({
         key={match.id}
         onClick={() => handleMatchClick(match)}
         style={{ position: 'absolute', top, left, width: CARD_W, height: MATCH_H }}
-        className={`rounded-lg border-2 overflow-hidden bg-white shadow-sm transition-all ${borderClass} ${showAsBye ? 'opacity-50' : ''}`}
+        className={`rounded-lg border-2 overflow-hidden bg-white shadow-sm transition-all ${borderClass}`}
       >
         <SlotRow
           participant={p1}
           isWinner={!isDraft && !!match.winnerId && match.winnerId === p1?.id}
           isLoser={!isDraft && !!match.winnerId && match.winnerId !== p1?.id && !!p1}
-          isBye={showAsBye}
+          walkoverLabel={false}
+          draftByeLabel={isDraft && isByeMatch && !p1}
           canDrag={canDrag && match.round === 1}
           matchId={match.id} slot={1}
           isDragOver={dragOver?.matchId === match.id && dragOver?.slot === 1}
@@ -356,12 +447,18 @@ export default function BracketView({
           onDragLeave={() => setDragOver(null)}
           onDrop={handleDrop}
         />
-        <ScoreRow score={match.score} hasResult={hasResult} bothReady={bothReady} isBye={showAsBye} />
+        <ScoreRow
+          score={match.score}
+          hasResult={hasResult}
+          bothReady={bothReady}
+          isWalkoverOnly={false}
+        />
         <SlotRow
           participant={p2}
           isWinner={!isDraft && !!match.winnerId && match.winnerId === p2?.id}
           isLoser={!isDraft && !!match.winnerId && match.winnerId !== p2?.id && !!p2}
-          isBye={showAsBye}
+          walkoverLabel={false}
+          draftByeLabel={isDraft && isByeMatch && !p2}
           canDrag={canDrag && match.round === 1}
           matchId={match.id} slot={2}
           isDragOver={dragOver?.matchId === match.id && dragOver?.slot === 2}
@@ -382,7 +479,7 @@ export default function BracketView({
       style={{
         position: 'absolute',
         top: HEADER_H + getMatchTopY({ round: totalRounds, position: 0 }) - 8,
-        left: getMatchX({ round: totalRounds, position: 0 }) + CARD_W + 16,
+        left: getMatchX(finalMatch!) + CARD_W + 16,
       }}
       className="bg-yellow-50 border-2 border-yellow-400 rounded-xl px-4 py-3 shadow text-center"
     >
@@ -393,11 +490,169 @@ export default function BracketView({
     </div>
   ) : null;
 
+  // ─── ドラフトシート表示 ──────────────────────────────────
+  const draftSheetView = (() => {
+    const r1Sorted = matches.filter(m => m.round === 1).sort((a, b) => a.position - b.position);
+
+    const totalH = DS_HEADER_H + slotCount * DS_SLOT_H;
+    const totalW = totalRounds <= 1
+      ? DS_NUM_W + DS_NAME_W + DS_COL_GAP + 20
+      : dsBoxLeft(totalRounds) + DS_BOX_W + 60;
+
+    // ラウンドヘッダー
+    const headerEls: React.ReactElement[] = [];
+    headerEls.push(
+      <div key="dsh1"
+        style={{ position: 'absolute', top: 0, left: DS_NUM_W, width: DS_NAME_W, height: DS_HEADER_H, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        className="text-xs font-bold text-gray-500"
+      >
+        {roundLabel(1, totalRounds)}
+      </div>
+    );
+    for (let r = 2; r <= totalRounds; r++) {
+      headerEls.push(
+        <div key={`dsh${r}`}
+          style={{ position: 'absolute', top: 0, left: dsBoxLeft(r), width: DS_BOX_W, height: DS_HEADER_H, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          className="text-xs font-bold text-gray-500"
+        >
+          {roundLabel(r, totalRounds)}
+        </div>
+      );
+    }
+
+    // 参加者スロット行
+    const slotEls: React.ReactElement[] = [];
+    for (let i = 0; i < slotCount; i++) {
+      const matchPos = Math.floor(i / 2);
+      const match = r1Sorted.find(m => m.position === matchPos);
+      if (!match) continue;
+
+      const slotNum = (i % 2 === 0) ? 1 as const : 2 as const;
+      const participantId = slotNum === 1 ? match.participant1Id : match.participant2Id;
+      const p   = getParticipant(participantId);
+      const isOver = dragOver?.matchId === match.id && dragOver?.slot === slotNum;
+      const isSrc  = dragSrc?.matchId  === match.id && dragSrc?.slot  === slotNum;
+      const draggable = canDrag && !!p;
+      const topY = DS_HEADER_H + i * DS_SLOT_H;
+
+      slotEls.push(
+        <div key={`dsnum-${i}`}
+          style={{ position: 'absolute', top: topY, left: 0, width: DS_NUM_W, height: DS_SLOT_H }}
+          className="flex items-center justify-center text-xs text-gray-400 select-none"
+        >
+          {i + 1}
+        </div>
+      );
+
+      slotEls.push(
+        <div key={`dsbox-${i}`}
+          draggable={draggable}
+          onDragStart={() => draggable && handleDragStart(match.id, slotNum)}
+          onDragOver={e => { e.preventDefault(); setDragOver({ matchId: match.id, slot: slotNum }); }}
+          onDragLeave={() => setDragOver(null)}
+          onDrop={() => handleDrop(match.id, slotNum)}
+          style={{ position: 'absolute', top: topY + 4, left: DS_NUM_W, width: DS_NAME_W, height: DS_SLOT_H - 8 }}
+          className={[
+            'border rounded flex items-center px-2.5 text-sm truncate transition-colors select-none',
+            isSrc  ? 'opacity-40' : '',
+            isOver ? 'bg-blue-50 border-blue-400' : p ? 'bg-white border-gray-300 shadow-sm' : 'bg-gray-50 border-gray-200',
+            draggable ? 'cursor-grab' : '',
+          ].filter(Boolean).join(' ')}
+        >
+          {p
+            ? <span className="truncate text-gray-800 font-medium">{p.name}</span>
+            : <span className="text-gray-300 text-xs">―</span>
+          }
+        </div>
+      );
+    }
+
+    // 上位ラウンド空ボックス
+    const upperBoxEls: React.ReactElement[] = [];
+    for (let r = 2; r <= totalRounds; r++) {
+      const rMatches = matches.filter(m => m.round === r).sort((a, b) => a.position - b.position);
+      for (const m of rMatches) {
+        const cy = dsMatchCY(r, m.position);
+        upperBoxEls.push(
+          <div key={`dsub-${m.id}`}
+            style={{ position: 'absolute', top: cy - DS_BOX_H / 2, left: dsBoxLeft(r), width: DS_BOX_W, height: DS_BOX_H }}
+            className="border border-gray-300 rounded bg-white"
+          />
+        );
+      }
+    }
+
+    // SVG ブラケット線
+    const svgLines: React.ReactElement[] = [];
+
+    if (totalRounds === 1) {
+      for (const m of r1Sorted) {
+        const topY  = dsSlotCY(m.position * 2);
+        const botY  = dsSlotCY(m.position * 2 + 1);
+        const startX = DS_NUM_W + DS_NAME_W;
+        const midX   = startX + DS_COL_GAP / 2;
+        svgLines.push(
+          <line key={`ds1t-${m.id}`} x1={startX} y1={topY} x2={midX} y2={topY} stroke="#cbd5e1" strokeWidth={1.5} strokeLinecap="round" />,
+          <line key={`ds1b-${m.id}`} x1={startX} y1={botY} x2={midX} y2={botY} stroke="#cbd5e1" strokeWidth={1.5} strokeLinecap="round" />,
+          <line key={`ds1v-${m.id}`} x1={midX} y1={topY} x2={midX} y2={botY} stroke="#cbd5e1" strokeWidth={1.5} strokeLinecap="round" />,
+        );
+      }
+    } else {
+      // Round 1 → Round 2
+      for (const m of r1Sorted) {
+        const topY   = dsSlotCY(m.position * 2);
+        const botY   = dsSlotCY(m.position * 2 + 1);
+        const midY   = dsMatchCY(1, m.position);
+        const startX = DS_NUM_W + DS_NAME_W;
+        const vertX  = startX + DS_COL_GAP / 2;
+        const endX   = dsBoxLeft(2);
+        svgLines.push(
+          <line key={`ds1t-${m.id}`} x1={startX} y1={topY} x2={vertX} y2={topY} stroke="#cbd5e1" strokeWidth={1.5} strokeLinecap="round" />,
+          <line key={`ds1b-${m.id}`} x1={startX} y1={botY} x2={vertX} y2={botY} stroke="#cbd5e1" strokeWidth={1.5} strokeLinecap="round" />,
+          <line key={`ds1v-${m.id}`} x1={vertX}  y1={topY} x2={vertX}  y2={botY} stroke="#cbd5e1" strokeWidth={1.5} strokeLinecap="round" />,
+          <line key={`ds1r-${m.id}`} x1={vertX}  y1={midY} x2={endX}   y2={midY} stroke="#cbd5e1" strokeWidth={1.5} strokeLinecap="round" />,
+        );
+      }
+
+      // Round r → Round r+1
+      for (let r = 2; r < totalRounds; r++) {
+        const rCount = matches.filter(m => m.round === r).length;
+        for (let k = 0; k < Math.floor(rCount / 2); k++) {
+          const topY   = dsMatchCY(r, k * 2);
+          const botY   = dsMatchCY(r, k * 2 + 1);
+          const midY   = dsMatchCY(r + 1, k);
+          const startX = dsBoxRight(r);
+          const vertX  = startX + DS_COL_GAP / 2;
+          const endX   = dsBoxLeft(r + 1);
+          svgLines.push(
+            <line key={`dsr${r}t-${k}`} x1={startX} y1={topY} x2={vertX} y2={topY} stroke="#cbd5e1" strokeWidth={1.5} strokeLinecap="round" />,
+            <line key={`dsr${r}b-${k}`} x1={startX} y1={botY} x2={vertX} y2={botY} stroke="#cbd5e1" strokeWidth={1.5} strokeLinecap="round" />,
+            <line key={`dsr${r}v-${k}`} x1={vertX}  y1={topY} x2={vertX}  y2={botY} stroke="#cbd5e1" strokeWidth={1.5} strokeLinecap="round" />,
+            <line key={`dsr${r}h-${k}`} x1={vertX}  y1={midY} x2={endX}   y2={midY} stroke="#cbd5e1" strokeWidth={1.5} strokeLinecap="round" />,
+          );
+        }
+      }
+    }
+
+    return (
+      <div className="overflow-x-auto overflow-y-auto px-6 py-4">
+        <div style={{ position: 'relative', width: totalW, height: totalH, minWidth: totalW }}>
+          {headerEls}
+          <svg style={{ position: 'absolute', top: 0, left: 0, width: totalW, height: totalH, pointerEvents: 'none', overflow: 'visible' }}>
+            {svgLines}
+          </svg>
+          {slotEls}
+          {upperBoxEls}
+        </div>
+      </div>
+    );
+  })();
+
   // ─── レンダリング ─────────────────────────────────────
   return (
     <div>
-      {/* ビュー切り替えボタン */}
-      {showViewToggle && (
+      {/* ビュー切り替えボタン（試合中のみ） */}
+      {showViewToggle && !isDraft && (
         <div className="flex justify-end mb-3 px-6 print:hidden">
           <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
             <button
@@ -423,21 +678,24 @@ export default function BracketView({
       )}
 
       {/* ブラケット本体 */}
-      {viewMode === 'tree' ? treeView : (
-        <div className="overflow-x-auto overflow-y-auto px-6 py-4">
-          <div style={{ position: 'relative', width: currentWidth, height: currentHeight + HEADER_H, minWidth: currentWidth }}>
-            {roundHeaders}
-            <svg
-              style={{ position: 'absolute', top: HEADER_H, left: 0, width: currentWidth, height: currentHeight, overflow: 'visible', pointerEvents: 'none' }}
-            >
-              {connectors}
-            </svg>
-            <div style={{ position: 'absolute', top: HEADER_H, left: 0, width: currentWidth, height: currentHeight }}>
-              {matchCards}
+      {isDraft ? draftSheetView : (
+        viewMode === 'tree' ? treeView : (
+          <div className="overflow-x-auto overflow-y-auto px-6 py-4">
+            <div style={{ position: 'relative', width: currentWidth, height: currentHeight + HEADER_H, minWidth: currentWidth }}>
+              {roundHeaders}
+              <svg
+                style={{ position: 'absolute', top: HEADER_H, left: 0, width: currentWidth, height: currentHeight, overflow: 'visible', pointerEvents: 'none' }}
+              >
+                {connectors}
+              </svg>
+              <div style={{ position: 'absolute', top: HEADER_H, left: 0, width: currentWidth, height: currentHeight }}>
+                {byeNameLabels}
+                {matchCards}
+              </div>
+              {tournament.status === 'completed' && winnerBanner}
             </div>
-            {tournament.status === 'completed' && winnerBanner}
           </div>
-        </div>
+        )
       )}
 
       {/* 試合結果入力モーダル */}
@@ -458,7 +716,9 @@ export default function BracketView({
 
 interface SlotRowProps {
   participant?: Participant;
-  isWinner: boolean; isLoser: boolean; isBye: boolean;
+  isWinner: boolean; isLoser: boolean;
+  walkoverLabel: boolean;
+  draftByeLabel?: boolean;
   canDrag: boolean; matchId: string; slot: 1 | 2; isDragOver: boolean;
   onDragStart: (matchId: string, slot: 1 | 2) => void;
   onDragOver:  (e: React.DragEvent) => void;
@@ -466,7 +726,7 @@ interface SlotRowProps {
   onDrop:      (matchId: string, slot: 1 | 2) => void;
 }
 
-function SlotRow({ participant, isWinner, isLoser, isBye, canDrag,
+function SlotRow({ participant, isWinner, isLoser, walkoverLabel, draftByeLabel, canDrag,
   matchId, slot, isDragOver, onDragStart, onDragOver, onDragLeave, onDrop }: SlotRowProps) {
   const draggable = canDrag && !!participant;
 
@@ -475,7 +735,9 @@ function SlotRow({ participant, isWinner, isLoser, isBye, canDrag,
   if (isDragOver)  { bg = 'bg-blue-100'; }
   else if (isWinner) { bg = 'bg-green-50'; textColor = 'text-green-800 font-bold'; }
   else if (isLoser)  { bg = 'bg-gray-50';  textColor = 'text-gray-400'; }
-  else if (isBye || !participant) { textColor = 'text-gray-400 italic'; }
+  else if (walkoverLabel || !participant) { textColor = 'text-gray-400 italic'; }
+
+  const emptyLabel = walkoverLabel ? '不戦勝' : draftByeLabel ? 'BYE' : '―';
 
   return (
     <div
@@ -489,7 +751,7 @@ function SlotRow({ participant, isWinner, isLoser, isBye, canDrag,
     >
       {isWinner && <span className="text-green-500 text-xs flex-shrink-0">●</span>}
       <span className="truncate" style={{ maxWidth: CARD_W - 32 }}>
-        {participant?.name ?? (isBye ? 'BYE' : '―')}
+        {participant?.name ?? emptyLabel}
       </span>
     </div>
   );
@@ -499,22 +761,24 @@ interface ScoreRowProps {
   score?: string;
   hasResult: boolean;
   bothReady: boolean;
-  isBye: boolean;
+  isWalkoverOnly: boolean;
 }
 
-function ScoreRow({ score, hasResult, bothReady, isBye }: ScoreRowProps) {
+function ScoreRow({ score, hasResult, bothReady, isWalkoverOnly }: ScoreRowProps) {
   return (
     <div
       style={{ height: SCORE_H }}
       className="border-t border-b border-gray-200 flex items-center justify-center px-2"
     >
-      {hasResult && score ? (
+      {isWalkoverOnly ? (
+        <span className="text-xs text-gray-500">不戦勝</span>
+      ) : hasResult && score ? (
         <span className="text-xs font-medium text-gray-500">
           {score}
         </span>
       ) : hasResult && !score ? (
         <span className="text-xs text-green-400">確定</span>
-      ) : bothReady && !isBye ? (
+      ) : bothReady ? (
         <span className="text-xs text-gray-300">vs</span>
       ) : null}
     </div>
